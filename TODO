@@ -1,0 +1,22 @@
+TO DO list for monitor ps. (Updated: 5/8/96)
+
+1. Handle forking with gdbm file locking.
+2. Additional improvements to database organization: products.db.
+3. Make it a deamon automatically.
+4. Documentation.
+
+
+---------------------------------------------
+CHANGES:
+
+5/8/96
+1. Added image database and x-mit to GUI.  Communication on NEIGHBOR_PORT.
+2. Experimented with forking, but, this version #ifdef 0 the forks.
+3. Improved keys in jobs database.  Database is incompatable with 
+   older version.
+4. Additional gdbm tools: delete_job_from_jobdb, list_job_status_db,
+   update_job_status_gdbm.
+5. send_product
+6. send_status
+7. Placed listgdb in gvs_tools/
+

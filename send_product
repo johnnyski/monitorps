@@ -1,0 +1,158 @@
+#! /usr/local/bin/perl
+
+# This program sends and echos status message, from standard input, to 
+# monitorps daemon and standard output, respectively.
+#
+# USAGE:
+#     send_product [-e] product file
+#
+#     -e      = Echo status message to stderr, as well as, send to monitorps
+#
+#     product = 1C-51, 1C-51_last, ..., 2A-55, 2A-55_last
+#               This is just a product identifier.
+#
+#     file    = The input filename. (gif images for testing).
+#
+# Example:
+#
+#     send_product 1C-51_last 950812.034.gif
+#
+
+sub usage {
+	print STDERR "Usage:\n";
+	print STDERR "INDEX OF LAST ARGV is $#ARGV\n";
+	print STDERR "THE LIST is @ARGV\n";
+	print STDERR "send_product [-e] product tape job# mm/dd/yy hh:mm image_file\n";
+	print STDERR "\n";
+	print STDERR "-e      = Echo status message to stderr, as well as, send to monitorps\n";
+	print STDERR "\n";
+	print STDERR "product = 1C-51, 2A-52i, 2A-53, 2A-54, 2A-55\n";
+	print STDERR "          This is just a product identifier.\n";
+	print STDERR "\n";
+	print STDERR "file    = The input filename (image_file):\n";
+	print STDERR "             1C-51 -> GIF image.\n";
+	print STDERR "             2A-53 -> ascii file.\n";
+	print STDERR "             2A-54 -> ascii file.\n";
+	print STDERR "\n";
+	print STDERR "Example:\n";
+	print STDERR "\n";
+	print STDERR "   send_product 1C-51 950812.034.gif\n";
+	print STDERR "\n";
+
+	exit(-1);
+}
+
+if ($#ARGV != 5 && $#ARGV != 6) {
+	do usage();
+}
+
+chop($hostname = `hostname`);
+$portnum = 5000;     # Monitorps listens on this port number.
+
+do call_socket($hostname, $portnum);
+# Prepend 'product' and add date/time information.
+#
+# To avoid the possiblity of sending two messages in the same 'second'
+# which means that 'monitorps' could receive the messages out of order, 
+# let us sleep.  The time granularity of 'date' is one second.
+sleep(1);
+
+if ($ARGV[0] == "-e") {
+	shift;
+	$do_echo = 1;
+}
+
+# Check if absolute path name.
+if ($ARGV[$#ARGV] !~ m-^/-) {
+	$ARGV[$#ARGV] = $ENV{'PWD'} . "/" . $ARGV[$#ARGV];
+}
+
+#
+# 'monitorps' will store this key as $key_last.
+#
+$key     = $ARGV[0];
+$tape    = $ARGV[1];
+$jobnum  = $ARGV[2];
+$date    = $ARGV[3];
+$time    = $ARGV[4];
+$file    = $ARGV[5];
+#
+# Convert to 151x151 xpm.gz images.
+#
+
+if ($key eq "1C-51" || $key eq "1B-51") {
+	# Already a GIF.  Make it a xpm 151x151.
+	system("giftoppm < $file | pnmscale -xysize 151 151 |ppmquant 256 | ppmtoxpm | gzip > $file" . ".xpm.gz");
+	$file = "$file" . ".xpm.gz";
+} elsif ("$key" eq "2A-54") {
+	system("csmap_to_pgm < $file | pnmflip -topbottom | pgmtoppm -map /usr/local/trmm/lib/cs_colormap.ppm | ppmtoxpm | gzip > $file" . ".xpm.gz");
+	$file = "$file" . ".xpm.gz";
+} elsif ($key eq "2A-53") {
+	printf "FILE: $file \n";
+	system("rrmap_to_pgm < $file | pgmnorm | ppmtoxpm | gzip > $file" . ".xpm.gz");
+	$file = "$file" . ".xpm.gz";
+} else {
+}
+
+
+@msg = ('product', $key, $tape, $jobnum, $date, $time, $file);
+$msg = join(' ', @msg); # Line delimeter needed.
+do write_data($msg);
+if ($do_echo == 1) {
+	print STDOUT "$msg";
+}
+close(S);
+
+# Can't delete $file yet.  The TCP/IP connection is not finished
+# sending the information to monitorps.  Or, monitorps has not
+# finished reading the file.  How do I delete $file?
+
+exit(0);
+
+
+############## Support subroutines ##############
+
+sub call_socket {
+	local($tohost, $port) = @_;
+
+	$AF_INET = 2;
+	$SOCK_STREAM = 1;
+	$SIG{'INT'} = 'doexit';
+
+	$isockaddr = 'S n a4 x8';
+	
+	chop($fromhost =`hostname`);
+	($name, $aliases, $proto) = getprotobyname('tcp');
+	($name, $aliases, $port) = getservbyname($port, 'tcp')
+		unless $port =~ /^\d+$/;	
+	($name, $aliases, $type, $len, $fromaddr) = gethostbyname($fromhost);
+	($name, $aliases, $type, $len, $toaddr) = gethostbyname($tohost);
+	
+	# pack addresses 
+	$from = pack($isockaddr, $AF_INET, 0, $fromaddr);
+	$to = pack($isockaddr, $AF_INET, $port, $toaddr);
+
+	# make the socket filehandle
+
+    socket(S, $AF_INET, $SOCK_STREAM, $proto) ||
+		die "Can't get socket: $!";
+
+    #give the socket an adrress.
+	bind(S, $from) || die "Can't bind:$!";
+	
+	# call up monitorps
+	connect(S, $to) || die "Can't connect:$!";
+
+	#set socket to be command buffered.
+	select(S); $| = 1; select(STDOUT);
+} # call_socket
+	
+sub write_data {
+	local($msg) = @_;
+
+	print S $msg;
+}
+
+sub doexit {
+	exit(1);
+}

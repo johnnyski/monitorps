@@ -1,0 +1,134 @@
+This is version v1.10.  Released 01/14/00.
+
+You can find 'monitorps'
+separately or in a more comprehensive package: GVBOX 1.*.
+Together with other programs, namely GVS and gms, this program records
+production status in a database.
+
+SYSTEM CONFIGURATION
+--------------------
+'monitorps' should be installed as setuid.  The UID can be any account,
+it does not have to be privalaged.  Do this to ensure that the database
+files are not owned by multiple users.
+
+chmod +s monitorps
+
+Additionally, monitorps is a deamon process and should be started when
+the system is rebooted.  On Linux, you do this by adding:
+
+/usr/local/trmm/GVBOX/bin/monitorps &
+
+to the file /etc/rc.d/rc.local.
+
+Or, you can run it from /etc/inittab.  Add the following entry to 
+/etc/inittab, then run '/sbin/telinit q'.
+
+-------------- cut add to /etc/inittab ----------------------
+# Local Deamons, system specific -JHM  4/49/97.
+g1:1235:respawn:/usr/local/trmm/GVBOX/bin/monitorps
+-------------- cut add to /etc/inittab ----------------------
+
+
+PROTOCOL
+--------
+
+The following generalized commands are understood by monitorps:
+   add neighbor x (x is a hostname [w/o domain?]
+   del neighbor x
+   add gui x.n   (n is a port number)
+   del gui x.n   (n is a port number)
+   del job host time1 time2 tapeid device program
+             Where:
+                host         is a hostname.
+                time1, time2 is UTC seconds from time().
+                tapeid       is a string.
+                device       is a device (/dev/8mm1, CD, disk).
+                program      is any string that identifies a program.
+                             Ex, level_1, 2A-54, dd, etc.
+   add product_gui x.n
+  
+   add psgui x.n  (to monitor ps on another computer).
+   del psgui x.n
+   reset gui x.n [host]
+          Where host is a specific host to request a reset from.
+   del database jobdb
+   del database imagedb
+
+The command must be sent to monitorps using the port 5000.  Normally,
+a GUI will be listening for responses from monitorps.  The GUI tells
+monitorps what port is used for communication, after the GUI first
+informs monitorps of its existance, by using prot 5000.
+
+The following happen when communicating with monitorps:
+
+   1. Monitorps waits, listening to port 5000, for commands or status messages.
+   2. When a GUI connects.  The GUI sends the command:
+      'add gui HOST.PORT', where HOST is the hostname and PORT is 
+      the TCP/IP port number.
+   3. Monitorps responds to the 'add gui HOST.PORT' command with
+      the Unix time (from time()).  I.e., monitorps responds with:
+           time: nnnnnnnn 
+      This allows the gui to make time corrections for status
+      information received from several computers; not all the
+      computers will have their clocks in sync.
+   4. When a command is recieved by monitorps, these actions are taken:
+      a. If the command comes from a gui, then the command is
+         repeated to all neighbors.
+      b. If a command comes from a neighbor, then the command is 
+         repeated to all neighbors, except back to the sender.
+   5. Job status messages are sent to the GUI when 'reset gui HOST.PORT [HOST]'
+      is recieved from the GUI.  [HOST] is optional and indicates
+      the computer the GUI resides.  If [HOST] exists, then only the
+      monitorps on the matching host will respond.  This prevents too much
+      babble.
+   6. Monitorps recieves all job status messages on port 5000.  The messages
+      are usually sent by 'send_status'.  They have the following form:
+
+      status: job# time tapeid device program file status
+
+      Where:
+         job#     - Integer.  Sequence number.  The job number.
+         time     - Integer.  Unix time().  Time in seconds since Jan 1, 1970.
+         tapeid   - String. Tape volume identifier.  
+         device   - String. disk, /dev/8mm1, etc.
+         program  - String. Any program identifier.  Product or program.
+         file     - String. Any file identifier.  File or filename.
+         status   - String. One of: running, successful, failed, warning,
+                                    finished, or aborted.
+
+      The last status message recieved overwrites a matching entry.
+      The match is performed on 'job#', 'tapeid', and 'program'.
+
+   7. Monitorps recieves all job products on port 5000.  These messages
+      are usually sent by 'send_product'.  They have the following form:
+
+   	  product <prod name> <tapeid> <job#> <giffile>
+	 
+	  Where: <prod name> is: 1C-51, 2A-52i, ..., 2A-55.
+             <file>      is: a GIF image.
+
+
+A little nomenclature:
+
+   neighbor - Another computer on the network that runs monitorps.
+   gui      - A user interface which displays responses from monitorps.
+   jobdb    - The gdbm file containing all production job status messages.
+   imagedb  - The gdbm file containing the images of the products.
+
+FILES
+-----
+/tmp/monitor.db     - The jobdb.
+/tmp/product.db     - The imagedb.
+/tmp/neighbors.dat  - The list of neighbors.  One line per computer.
+
+DEBUGGING
+---------
+For debugging, you can use the '-v' option.  It doesn't place the monitorps
+program into the background.  You will be able to monitor all communication
+from 'send_status' or 'gms'.  The program that sends most of the messages
+to monitorps is 'alltape_level_1n2'; this program is located in the GVS
+package.
+
+
+
+

@@ -1,0 +1,180 @@
+#! /usr/local/bin/perl
+
+# This program sends and echos status message, from standard input, to 
+# monitorps daemon and standard output, respectively.
+#
+# USAGE:
+#     send_status [-e] jobnum tapeid tape_device program filename status
+#
+#     -e     = Echo status message to stderr, as well as, send to monitorps
+#
+#     jobnum = This is the job sequence number.  It can be any integer
+#              number.  Try to start at 1, if possible because this makes
+#              jobs easy to track.  Especially, easy if the filename is
+#              derived from the jobnum. However, gms expects jobnum to start
+#	           at 1.
+#     tapeid = Any uniquely identifying string.  This is typically the
+#              volume tape id (printed label) of a physical tape.
+#              Jobs are easy to track if the filename is derived from this
+#              values: ex, $filename = "$tapeid.$jobnum" (eg. N00012.3).
+#              (max 8 char).
+#     tape_device = Physical device that the tapeid tape is residing.
+#                   Ex, /dev/8mm1, /dev/8mm2.  If no tape drive is used
+#                   This can be any string (max 8 char).
+#     program = (max 8 char) any string that identifies the job.  This
+#               is typically a product name.  Eg, 1C-51, cdrom, nsigcp, etc.
+#     filename = The filename you're reporting the status about. (8 char)
+#     status = "running"
+#              "successful"
+#              "failed"
+#              "warning"
+#              "finished"
+#              "aborted"
+#
+#     The fields that uniquely identify a job (to 'gms' anyway) are:
+#          tapeid, jobnum, and program.
+#     All other fields are informational.
+#
+# Example:
+#
+#   These two are identical:
+#     send_status 1 N00012 /dev/8mm1 prod1 N00012.1 running
+#     send_status '1 N00012 /dev/8mm1 prod1 N00012.1 running'
+#
+#     send_status 1 N00012 /dev/8mm1 prod1 N00012.1 successful
+#
+#   Typically you want to send two messages for each jobnum.  One that
+#   indicates the job has started (use status=running) and one that indicates
+#   that the job has finished (use status=successful,warning,or failed).
+#   Then, lastly send the status 'finished' to indicate that all the
+#   processes for a particular tapeid are complete.  This is used by 'gms'.
+#
+
+sub usage {
+	print STDERR "Usage:\n";
+    print STDERR "   send_status jobnum tapeid tape_device program filename status\n";
+	print STDERR "\n";
+    print STDERR "   -e     = Echo status message to stderr, as well as, send to monitorps\n\n";
+    print STDERR "   jobnum = This is the job sequence number.  It can be any integer \n";
+    print STDERR "            number.  Try to start at 1, if possible because this makes\n";
+    print STDERR "            jobs easy to track.  Especially, easy if the filename is\n";
+    print STDERR "            derived from the jobnum. However, gms expects\n";
+	print STDERR "            jobnum to start at 1.\n";
+    print STDERR "   tapeid = Any uniquely identifying string.  This is typically the\n";
+    print STDERR "            volume tape id (printed label) of a physical tape.\n";
+    print STDERR "            Jobs are easy to track if the filename is derived from this\n";
+    print STDERR "            values: ex, $filename = \"$tapeid.$jobnum\" (eg. N00012.3).\n";
+    print STDERR "            (max 8 char).\n";
+    print STDERR "   tape_device = Physical device that the tapeid tape is residing.\n";
+    print STDERR "                 Ex, /dev/8mm1, /dev/8mm2.  If no tape drive is used\n";
+    print STDERR "                 This can be any string (max 8 char).\n";
+    print STDERR "   program = (max 8 char) any string that identifies the job.  This\n";
+    print STDERR "             is typically a product name.  Eg, 1C-51, cdrom, nsigcp, etc.\n";
+    print STDERR "   filename = The filename you're reporting the status about. (8 char)\n";
+    print STDERR "   status = running\n";
+    print STDERR "            successful\n";
+    print STDERR "            failed\n";
+    print STDERR "            warning\n";
+    print STDERR "            finished\n";
+	print STDERR "            aborted\n";
+	print STDERR "\n";
+    print STDERR "    The fields that uniquely identify a job (to 'gms' anyway) are:\n";
+    print STDERR "        tapeid, jobnum, and program.\n";
+    print STDERR "   All other fields are informational.\n";
+
+	exit(-1);
+}
+
+if ($#ARGV < 0) {
+	do usage();
+}
+$SIG{'INT'} = 'doexit';
+$SIG{'KILL'} = 'doexit';
+$SIG{'STOP'} = 'doexit';
+$SIG{'SEGV'} = 'doexit';
+$SIG{'ILL'} = 'doexit';
+$SIG{'FPE'} = 'doexit';
+
+chop($hostname = `hostname`);
+#$portnum = 5003;     # using the same port num as gui e.g. TO_MONITOR_PORT
+$portnum = 5000;     # Test sending to the neighbor port!!!
+#$portnum = 5002;      # to gui for testing only
+
+do call_socket($hostname, $portnum);
+# Prepend 'status:' and add date/time information.
+#
+# To avoid the possiblity of sending two messages in the same 'second',
+# let us sleep.
+# 'monitorps' could receive the messages out of order, it is the nature
+# of TCP/IP -- This sleep should eliminate any out-of-order messages,
+# however a remote possibility exists that messages will be received 
+# out-of-order.
+# Also, the time granularity of 'date' is one second.
+sleep(1);
+
+if ($ARGV[0] == "-e") {
+	shift;
+	$do_echo = 1;
+}
+
+@msg = ('status:', @ARGV);
+$date = time; # Seconds since Jan 1, 1970
+splice(@msg, 2, 0, split(' ',$date)); 
+$msg = join(' ', (@msg, "\n")); # Line delimeter needed.
+
+#system("cat /user/merritt/au/".$msg[$#msg] .".au > /dev/audio");
+
+do write_data($msg);
+if ($do_echo == 1) {
+	print STDERR "$msg";
+}
+exit(0);
+
+
+############## Support subroutines ##############
+
+sub call_socket {
+	local($tohost, $port) = @_;
+
+	$AF_INET = 2;
+	$SOCK_STREAM = 1;
+
+	$isockaddr = 'S n a4 x8';
+	
+	chop($fromhost =`hostname`);
+	($name, $aliases, $proto) = getprotobyname('tcp');
+	($name, $aliases, $port) = getservbyname($port, 'tcp')
+		unless $port =~ /^\d+$/;	
+	($name, $aliases, $type, $len, $fromaddr) = gethostbyname($fromhost);
+	($name, $aliases, $type, $len, $toaddr) = gethostbyname($tohost);
+	
+	# pack addresses 
+	$from = pack($isockaddr, $AF_INET, 0, $fromaddr);
+	$to = pack($isockaddr, $AF_INET, $port, $toaddr);
+
+	# make the socket filehandle
+
+    socket(S, $AF_INET, $SOCK_STREAM, $proto) ||
+		die "Can't get socket: $!";
+
+    #give the socket an adrress.
+	bind(S, $from) || die "Can't bind:$!";
+	
+	# call up monitorps
+	connect(S, $to) || die "Can't connect:$!";
+
+	#set socket to be command buffered.
+	select(S); $| = 1; select(STDOUT);
+} # call_socket
+	
+sub write_data {
+	local($msg) = @_;
+
+	print S $msg;
+}
+
+sub doexit {
+	local($signal) = @_;
+	exit(-2) if ($signal == 'STOP' || $signal == 'KILL' || $signal == 'INT');
+	exit(-1);
+}
